@@ -1,7 +1,10 @@
 package pmap
 
 import (
+	"fmt"
 	"reflect"
+	"runtime"
+	"sync"
 	"testing"
 )
 
@@ -52,4 +55,65 @@ func TestPartitionedMap(t *testing.T) {
 	if _, ok := m.Get("not"); ok {
 		t.Errorf("unexpected Get(abc) = _, %v", ok)
 	}
+}
+
+func BenchmarkMap(b *testing.B) {
+	var (
+		wg sync.WaitGroup
+		mx sync.RWMutex
+	)
+	m := make(map[string]int)
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			mx.Lock()
+			defer mx.Unlock()
+			m[fmt.Sprintf("%d", index)] = index
+		}(i)
+	}
+	wg.Wait()
+}
+
+func BenchmarkSyncMap(b *testing.B) {
+	var (
+		wg sync.WaitGroup
+		m  sync.Map
+	)
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			m.Store(fmt.Sprintf("%d", index), index)
+		}(i)
+	}
+	wg.Wait()
+}
+
+func BenchmarkPartitionedMap(b *testing.B) {
+	var wg sync.WaitGroup
+	m := NewPartitionedMap[string, int](runtime.NumCPU(), 0, func(key string) int {
+		var sum int
+		for i, s := range key {
+			sum += int(s) * (i + 1)
+		}
+		return sum
+	})
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			m.Set(fmt.Sprintf("%d", index), index)
+		}(i)
+	}
+	wg.Wait()
 }
