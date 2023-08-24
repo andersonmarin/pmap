@@ -72,10 +72,11 @@ func BenchmarkMapSet(b *testing.B) {
 			go func(index int) {
 				defer wg.Done()
 				mx.Lock()
-				defer mx.Unlock()
 				m[fmt.Sprintf("%d", index)] = index
+				mx.Unlock()
 			}(i)
 		}
+
 		wg.Wait()
 	})
 
@@ -94,6 +95,7 @@ func BenchmarkMapSet(b *testing.B) {
 				m.Store(fmt.Sprintf("%d", index), index)
 			}(i)
 		}
+
 		wg.Wait()
 	})
 
@@ -116,6 +118,94 @@ func BenchmarkMapSet(b *testing.B) {
 				m.Set(fmt.Sprintf("%d", index), index)
 			}(i)
 		}
+
+		wg.Wait()
+	})
+}
+
+func BenchmarkMapGet(b *testing.B) {
+	b.Run("benchmark standard map get", func(b *testing.B) {
+		var (
+			wg sync.WaitGroup
+			mx sync.RWMutex
+		)
+		m := make(map[string]int)
+		for i := 0; i < b.N; i++ {
+			m[fmt.Sprintf("%d", i)] = i
+		}
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				mx.RLock()
+				v, ok := m[fmt.Sprintf("%d", index)]
+				mx.RUnlock()
+				if !ok && v == 0 {
+					b.Fail()
+				}
+			}(i)
+		}
+
+		wg.Wait()
+	})
+
+	b.Run("benchmark sync map get", func(b *testing.B) {
+		var (
+			wg sync.WaitGroup
+			m  sync.Map
+		)
+		for i := 0; i < b.N; i++ {
+			m.Store(fmt.Sprintf("%d", i), i)
+		}
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				v, ok := m.Load(fmt.Sprintf("%d", index))
+				if !ok && v == 0 {
+					b.Fail()
+				}
+			}(i)
+		}
+
+		wg.Wait()
+	})
+
+	b.Run("benchmark partitioned map get", func(b *testing.B) {
+		var wg sync.WaitGroup
+		m := NewPartitionedMap[string, int](runtime.NumCPU(), 0, func(key string) int {
+			var sum int
+			for i, s := range key {
+				sum += int(s) * (i + 1)
+			}
+			return sum
+		})
+		for i := 0; i < b.N; i++ {
+			m.Set(fmt.Sprintf("%d", i), i)
+		}
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				v, ok := m.Get(fmt.Sprintf("%d", index))
+				if !ok && v == 0 {
+					b.Fail()
+				}
+			}(i)
+		}
+
 		wg.Wait()
 	})
 }
