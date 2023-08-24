@@ -57,63 +57,65 @@ func TestPartitionedMap(t *testing.T) {
 	}
 }
 
-func BenchmarkMap(b *testing.B) {
-	var (
-		wg sync.WaitGroup
-		mx sync.RWMutex
-	)
-	m := make(map[string]int)
-	b.ReportAllocs()
-	b.ResetTimer()
+func BenchmarkMapSet(b *testing.B) {
+	b.Run("benchmark standard map set", func(b *testing.B) {
+		var (
+			wg sync.WaitGroup
+			mx sync.RWMutex
+		)
+		m := make(map[string]int)
+		b.ReportAllocs()
+		b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			mx.Lock()
-			defer mx.Unlock()
-			m[fmt.Sprintf("%d", index)] = index
-		}(i)
-	}
-	wg.Wait()
-}
-
-func BenchmarkSyncMap(b *testing.B) {
-	var (
-		wg sync.WaitGroup
-		m  sync.Map
-	)
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			m.Store(fmt.Sprintf("%d", index), index)
-		}(i)
-	}
-	wg.Wait()
-}
-
-func BenchmarkPartitionedMap(b *testing.B) {
-	var wg sync.WaitGroup
-	m := NewPartitionedMap[string, int](runtime.NumCPU(), 0, func(key string) int {
-		var sum int
-		for i, s := range key {
-			sum += int(s) * (i + 1)
+		for i := 0; i < b.N; i++ {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				mx.Lock()
+				defer mx.Unlock()
+				m[fmt.Sprintf("%d", index)] = index
+			}(i)
 		}
-		return sum
+		wg.Wait()
 	})
-	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			m.Set(fmt.Sprintf("%d", index), index)
-		}(i)
-	}
-	wg.Wait()
+	b.Run("benchmark sync map set", func(b *testing.B) {
+		var (
+			wg sync.WaitGroup
+			m  sync.Map
+		)
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				m.Store(fmt.Sprintf("%d", index), index)
+			}(i)
+		}
+		wg.Wait()
+	})
+
+	b.Run("benchmark partitioned map set", func(b *testing.B) {
+		var wg sync.WaitGroup
+		m := NewPartitionedMap[string, int](runtime.NumCPU(), 0, func(key string) int {
+			var sum int
+			for i, s := range key {
+				sum += int(s) * (i + 1)
+			}
+			return sum
+		})
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				m.Set(fmt.Sprintf("%d", index), index)
+			}(i)
+		}
+		wg.Wait()
+	})
 }
