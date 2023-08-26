@@ -209,3 +209,122 @@ func BenchmarkMapGet(b *testing.B) {
 		wg.Wait()
 	})
 }
+
+func BenchmarkMapGetSet(b *testing.B) {
+	b.Run("benchmark standard map get set", func(b *testing.B) {
+		var mx sync.RWMutex
+		m := make(map[string]int)
+		c := make(chan int, 0xff)
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		go func() {
+			var wg sync.WaitGroup
+			for i := 0; i < b.N; i++ {
+				wg.Add(1)
+				go func(index int) {
+					defer wg.Done()
+					mx.Lock()
+					m[fmt.Sprintf("%d", index)] = index
+					mx.Unlock()
+					c <- index
+				}(i)
+			}
+			wg.Wait()
+			close(c)
+		}()
+
+		var wg sync.WaitGroup
+		for i := range c {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				mx.RLock()
+				v, ok := m[fmt.Sprintf("%d", index)]
+				mx.RUnlock()
+				if !ok && v == 0 {
+					b.Fail()
+				}
+			}(i)
+		}
+		wg.Wait()
+	})
+
+	b.Run("benchmark sync map get set", func(b *testing.B) {
+		var m sync.Map
+		c := make(chan int, 0xff)
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		go func() {
+			var wg sync.WaitGroup
+			for i := 0; i < b.N; i++ {
+				wg.Add(1)
+				go func(index int) {
+					defer wg.Done()
+					m.Store(fmt.Sprintf("%d", index), index)
+					c <- index
+				}(i)
+			}
+			wg.Wait()
+			close(c)
+		}()
+
+		var wg sync.WaitGroup
+		for i := range c {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				v, ok := m.Load(fmt.Sprintf("%d", index))
+				if !ok && v == 0 {
+					b.Fail()
+				}
+			}(i)
+		}
+		wg.Wait()
+	})
+
+	b.Run("benchmark partitioned map get set", func(b *testing.B) {
+		m := NewPartitionedMap[string, int](runtime.NumCPU(), 0, func(key string) int {
+			var sum int
+			for i, s := range key {
+				sum += int(s) * (i + 1)
+			}
+			return sum
+		})
+
+		c := make(chan int, 0xff)
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		go func() {
+			var wg sync.WaitGroup
+			for i := 0; i < b.N; i++ {
+				wg.Add(1)
+				go func(index int) {
+					defer wg.Done()
+					m.Set(fmt.Sprintf("%d", index), index)
+					c <- index
+				}(i)
+			}
+			wg.Wait()
+			close(c)
+		}()
+
+		var wg sync.WaitGroup
+		for i := range c {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				v, ok := m.Get(fmt.Sprintf("%d", index))
+				if !ok && v == 0 {
+					b.Fail()
+				}
+			}(i)
+		}
+		wg.Wait()
+	})
+}
